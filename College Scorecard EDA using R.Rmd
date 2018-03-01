@@ -1,0 +1,482 @@
+---
+title: "College Scorecard Code"
+author: "Yu Wang"
+date: "November 25, 2016"
+output: pdf_document
+---
+
+******
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Table of Contents
+### -1. Import Libraries
+### -2. Connect to database and Database Properties
+### -3. Number of Colleges though Time
+### -4. SAT Scores
+### -5. Income after 10 Years and Best ROI
+      -ROI by School Cost
+      -ROI by SAT total score
+### -6. Graduation Rates
+### -7. Conclusions
+*****
+
+## 1. Import Libraries
+
+The database is given in both a SQLite file and CSVs for each year per file. I will mostly be working with the SQLite because all the data is in one place. 
+
+I installed SQLiteStudio to look at the variables. The entire table crashes SQLiteStudio on my computer due to file size.
+But queries can still be performed to check the output. Most of the data is worked on for 2011 because that is the last dataset that has md_earn_wne_p10, the main salary component I looked at.
+
+Please note, for every section the APPROCH was done once, to save computation time when Knitting the PDF.
+
+First import the libraries that would be needed.
+```{r message=FALSE}
+library(RSQLite)  # Library to work with SQLite
+library(dplyr)    # Library for data manipulation
+library(ggplot2)  # Library for plotting
+```
+
+*****
+## 2. Connect to database and import
+
+You can also embed plots, for example:
+
+```{r, echo=TRUE}
+db <- dbConnect(dbDriver("SQLite"), "C:/Users/Adam/Desktop/CAPSTONE/output/database.sqlite")
+dbGetQuery(db, "PRAGMA temp_store=2;") #Do not load everything into RAM
+```
+
+The database one have 1 table called Scorecard. What is in scorecard?
+
+Here the head and number of columns of the table is shown. A detailed description of the column can be found within FULLDataDOCUMENTATION.PDF file.
+
+```{r}
+scorecard_columns = dbGetQuery(db, "PRAGMA table_info('Scorecard')")
+head(scorecard_columns)
+nrow(scorecard_columns) # This is the number of columns within the table.
+```
+
+The number of rows in the database:
+
+```{r}
+dbGetQuery(db, "SELECT count(*) FROM Scorecard")
+
+```
+
+So we see this is a very big data base with 1731 Columns and 124699 Rows. The dataset is separated by different years which is given in CSV format as well.
+
+*****
+
+## 3. Number of Colleges though Time
+
+How many college in US from 1996 to 2013?
+
+```{r}
+numberOfSchools = dbGetQuery(db, "SELECT Year, COUNT(Id) NumSchools 
+                             FROM Scorecard GROUP by Year")
+head(numberOfSchools)
+```
+
+Let's plot this using ggplot2
+
+```{r}
+best_fit <- lm(numberOfSchools$NumSchools~numberOfSchools$Year)
+best_fit
+summary(best_fit)
+
+ggplot(numberOfSchools, aes(x=numberOfSchools$Year, y=numberOfSchools$NumSchools, 
+                            group=1)) + geom_line() + 
+                            geom_point() + ylim(0, 8000) + xlim(1996, 2013) + 
+                            geom_abline(intercept = -139421.46, slope = 73.01, colour='#00897B') +
+                            labs(x="Year",y="Number of Colleges") + 
+                            ggtitle("Number of Colleges from 1996 to 2013") 
+```
+
+From this we can predict the number of colleges in the future. There is a clear indication that the number of colleges is increasing. However, given only a few years of data points, the prediction woudn't be accuract.
+
+
+*****
+
+## 4. SAT Scores
+
+Distribution of SAT scores
+
+First import database with unneeded attributes elimated, then the data was cleaned such that if any SAT score is NULL it is left out. Take a look at the head of this dataset:
+
+```{r}
+sat <- dbGetQuery(db, "SELECT INSTNM,
+       SATMTMID,
+       SATVRMID,
+       SATWRMID
+FROM Scorecard
+WHERE Year=2013
+  AND SATMTMID IS NOT NULL
+  AND SATVRMID IS NOT NULL
+  AND SATWRMID IS NOT NULL")
+
+# INSTNM is College Name, SATMTMID is SAT Math Score medium, 
+# SATVRMID is SAT Verbal Score medium, SATWRMID is SAT Writing Score medium.
+
+head(sat)
+```
+
+Here is the distribution of Math, Verbal and Written SAT Scores averages for the Colleges
+
+```{r}
+hist(sat$SATMTMID, main="Distribution of Math SAT Scores", xlab="SAT Math Score", ylab="Count",  
+     col=rgb(1,0,0,0.2), breaks = seq(300,800,by=10))
+
+hist(sat$SATVRMID, main="Distribution of Verbal SAT Scores", xlab="SAT Math Score", ylab="Count",
+     col=rgb(0,0,1,0.2), breaks = seq(300,800,by=10), add = F)
+
+hist(sat$SATWRMID, main="Distribution of Writing SAT Scores", xlab="SAT Math Score", ylab="Count",
+     col=rgb(0,1,0,0.2), breaks = seq(300,800,by=10), add = F)
+```
+
+Here is the distribution of Math SAT Scores averages for the Colleges
+
+```{r}
+hist(sat$SATMTMID, main="SAT Math, Verbal and Writing on a single Histogram", 
+     xlab="Time", ylab="Count",  
+     col=rgb(1,0,0,0.2), breaks = seq(300,800,by=5))
+hist(sat$SATVRMID, col=rgb(0,0,1,0.2), breaks = seq(300,800,by=5), add = T)
+hist(sat$SATWRMID, col=rgb(0,1,0,0.2), breaks = seq(300,800,by=5), add = T)
+```
+
+All the distribution of SAT scores are bell curve like and has a mid point at around 500.
+
+### T-tests for SAT
+
+We can do a t-test for SAT Math, SAT Written, SAT Verbal to see if they are similar enough to be the same data-set.
+
+```{r}
+t.test(sat$SATMTMID, sat$SATWRMID, alternative = c("two.sided"), 
+       paired = F, var.equal = T, conf.level = 0.95)
+```
+
+```{r}
+t.test(sat$SATMTMID, sat$SATVRMID, alternative = c("two.sided"), 
+       paired = F, var.equal = T, conf.level = 0.95)
+```
+
+```{r}
+t.test(sat$SATVRMID, sat$SATWRMID, alternative = c("two.sided"), 
+       paired = F, var.equal = T, conf.level = 0.95)
+```
+
+Since the P value is all smaller than 0.05 here we reject the Null Hypothesis that theses are from the same data-set. This questions if adding SAT scores of different subjects to get total SAT score is a good idea, it might be a good excerise in the future to do the SAT analysis by subject rather than add together.
+
+*****
+
+## 5. Income of students after 10 Years and Best ROI
+
+Salary by school
+
+Let's first import the all the colleges and see which has the highest median earnings after 10 years.
+```{r}
+salary <- dbGetQuery(db, "SELECT INSTNM College,
+       CONTROL CollegeType,
+       md_earn_wne_p10
+FROM Scorecard
+WHERE Year=2011
+AND md_earn_wne_p10 IS NOT NULL
+AND md_earn_wne_p10 != 'PrivacySuppressed'
+ORDER BY md_earn_wne_p10 DESC")
+```
+
+```{r}
+head(salary)
+```
+
+Here it is arranged by highest earnings first. Notice the highests are all medical schools. We will fix this later on.
+For the plot below, we see that there are many colleges with average salary of 250k+ per year but theses are all for medical schools. 
+
+```{r}
+ggplot(salary, aes(x=salary$md_earn_wne_p10, color=CollegeType, fill=CollegeType, 
+                   group=CollegeType)) +
+  geom_density(alpha=0.5) +
+  theme_light(base_size=16) +
+  xlab("Median Earnings after 10 Years (Dollars)") + ylab("Number of Schools") +
+  ggtitle("Median Earnings after 10 Years by 
+          Type of School") 
+```
+
+Here we gotten rid of the medical schools by making sure the college has at least 3000 students.
+
+```{r}
+salary2 <- dbGetQuery(db, "SELECT INSTNM College,
+       CONTROL CollegeType,
+       md_earn_wne_p10,
+       UGDS
+FROM Scorecard
+WHERE Year=2011
+AND md_earn_wne_p10 IS NOT NULL
+AND md_earn_wne_p10 != 'PrivacySuppressed'
+AND UGDS IS NOT NULL
+AND UGDS > 3000
+ORDER BY md_earn_wne_p10 DESC")
+
+head(salary2)
+```
+
+The head here is more of what is expected. Top famous colleges have the highest student earnings.
+
+```{r}
+ggplot(salary2, aes(x=salary2$md_earn_wne_p10, color=CollegeType, fill=CollegeType, 
+                    group=CollegeType)) +
+  geom_density(alpha=0.5) +
+  theme_light(base_size=16) +
+  xlab("Median Earnings 10 Years after Not including Medical Schools") + ylab("") +
+  ggtitle("Median Earnings after 10 Years by 
+          Type of School with Undergrad pop. >3000") 
+```
+
+How we see a more expected earnings. From the graph, we see that private nonprofit has the best earnings. While private for-profit and public colleges have similar earnings, this peak is around 30,000$ per year.
+
+***
+## ROI by SAT total score
+
+First let's import the data from the data base with UGDS (The number of students) greater than 3000. And clean data with columns where any SAT score is NULL. This year we looked at is 2011 because the medium earnings data is the lastest.
+```{r}
+sat_salary <- dbGetQuery(db, "SELECT INSTNM College,
+       CONTROL CollegeType,
+       md_earn_wne_p10,
+       UGDS,
+       SATMTMID,
+       SATVRMID,
+       SATWRMID
+FROM Scorecard
+WHERE Year=2011
+AND md_earn_wne_p10 IS NOT NULL
+AND md_earn_wne_p10 != 'PrivacySuppressed'
+AND UGDS IS NOT NULL
+AND UGDS > 3000
+AND SATMTMID IS NOT NULL
+AND SATVRMID IS NOT NULL
+AND SATWRMID IS NOT NULL
+ORDER BY md_earn_wne_p10 DESC")
+```
+
+See head to make sure everything is expected and create new column for total SAT score.
+```{r}
+head(sat_salary)
+
+
+sat_salary$total_sat <- sat_salary$SATMTMID + sat_salary$SATVRMID + sat_salary$SATWRMID
+head(sat_salary)
+```
+
+As expected, famous Ivy league schools in the US have the highest SAT scores in all areas including total sat score.
+
+Create column for best return, best earnings per sat score.
+```{r}
+sat_salary$salary_to_sat <- sat_salary$md_earn_wne_p10 / sat_salary$total_sat
+```
+
+Rearrange dataframe by salary_to_sat with highest first.
+```{r}
+top_sat_salary = sat_salary[order(sat_salary$salary_to_sat, decreasing = T),]
+```
+
+See top twenty.
+```{r}
+top_20_sat_salary <- top_sat_salary[1:20,]
+
+head(top_20_sat_salary)
+```
+
+
+```{r}
+#Makes College into an ordered factor already so ggplot doesn't reorder it for me.
+
+top_20_sat_salary$College <- factor(top_20_sat_salary$College, levels = top_20_sat_salary$College)
+
+ggplot(data=top_20_sat_salary, aes(x=top_20_sat_salary$College, y=top_20_sat_salary$salary_to_sat)) +
+    geom_bar(stat="identity", fill="#00897B") + 
+  theme(axis.text.x=element_text(angle=90,hjust=1,vjust=0.5)) +
+  xlab("College") + ylab('') +
+  ggtitle("Best College for Earnings per Total SAT score") 
+```
+
+Top famous universities have the best earnings per total SAT score, but some not as famous universities done well as well. There aren't any community colleges that have reached the top 20 list.
+
+***
+### Best Salary for Education Cost
+
+```{r}
+edu_cost <- dbGetQuery(db, "SELECT INSTNM College,
+       CONTROL CollegeType,
+       md_earn_wne_p10,
+       UGDS,
+       COSTT4_A
+FROM Scorecard
+WHERE Year=2011
+AND md_earn_wne_p10 IS NOT NULL
+AND md_earn_wne_p10 != 'PrivacySuppressed'
+AND UGDS IS NOT NULL
+AND UGDS > 3000
+ORDER BY md_earn_wne_p10 DESC")
+```
+
+#### 20 most expensive large Colleges:
+
+Let's take a look at the 20 most expensive large colleges before seeing which is best bang for you buck.
+```{r}
+top_edu_cost = edu_cost[order(edu_cost$COSTT4_A, decreasing = T),]
+
+top_20_edu_cost = edu_cost[order(edu_cost$COSTT4_A, decreasing = T),][1:20,]
+
+top_20_edu_cost
+
+top_20_edu_cost$College <- factor(top_20_edu_cost$College, levels = top_20_edu_cost$College)
+
+ggplot(data=top_20_edu_cost, aes(x=top_20_edu_cost$College, y=top_20_edu_cost$COSTT4_A)) +
+    geom_bar(stat="identity", fill="#00897B") + theme(axis.text.x=element_text(angle=90,hjust=1,vjust=0.5)) +
+  xlab("Colleges") + ylab("Total Expenses") +
+  ggtitle("Top 20 most expensive large colleges") 
+```
+
+Here we see the top 20 most expensive colleges. Maybe of these colleges are in large cities or expensive areas.
+
+```{r}
+ggplot(top_edu_cost, aes(x=top_edu_cost$COSTT4_A, color=CollegeType, fill=CollegeType, group=CollegeType)) +
+  geom_density(alpha=0.5) +
+  theme_light(base_size=16) +
+  xlab("Total Expense") + ylab("Distribution") +
+  ggtitle("Distribution
+          of Total Expense for College by College Type")
+```
+
+We see that private non-profit ranges from not very expense to very expense, of almost 60k a year. While public colleges are mostly less than 20k per year. Private for-profit is more expensive than public but in most cases less than non profit.
+
+Get the best ratio of earnings to cost
+```{r}
+edu_cost$salary_to_cost <- edu_cost$md_earn_wne_p10 / edu_cost$COSTT4_A
+head(edu_cost)
+
+best_deal <- edu_cost[order(edu_cost$salary_to_cost, decreasing = T),]
+head(best_deal)
+```
+
+```{r}
+best_deal_top20 <- best_deal[1:20,]
+
+best_deal_top20$College <- factor(best_deal_top20$College, levels = best_deal_top20$College)
+
+ggplot(data=best_deal_top20, aes(x=best_deal_top20$College, y=best_deal_top20$salary_to_cost)) +
+    geom_bar(stat="identity", fill="#00897B") + 
+  theme(axis.text.x=element_text(angle=90,hjust=1,vjust=0.5)) +
+  xlab("College") + ylab("Expense") +
+  ggtitle("Best ROI for Colleges")
+```
+
+We see that a lot of community colleges have the best of ROI but the investment isn't just cost of education, there is also the time it cost to complete the education. However, this shows that community colleges still are a good idea due to its high ROI.
+
+
+****
+## 6. Graduation Rates
+
+Graduation Rate and Graduation Rate to SAT ratio
+
+```{r}
+grad_rate <- dbGetQuery(db, "SELECT INSTNM College,
+       CONTROL CollegeType,
+       md_earn_wne_p10,
+       UGDS,
+       SATMTMID,
+       SATVRMID,
+       SATWRMID,
+       C150_4
+       
+FROM Scorecard
+
+WHERE Year=2011
+AND md_earn_wne_p10 IS NOT NULL
+AND md_earn_wne_p10 != 'PrivacySuppressed'
+AND UGDS IS NOT NULL
+AND UGDS > 3000
+AND SATMTMID IS NOT NULL
+AND SATVRMID IS NOT NULL
+AND SATWRMID IS NOT NULL
+AND C150_4 IS NOT NULL
+ORDER BY C150_4 DESC")
+```
+
+Top 20 schools with the best Graduation Rate:
+
+```{r}
+top_grad_rate = grad_rate[order(grad_rate$C150_4, decreasing = T),]
+
+top_20_grad_rate = top_grad_rate[1:20,]
+
+top_20_grad_rate
+
+top_20_grad_rate$College <- factor(top_20_grad_rate$College, levels = top_20_grad_rate$College)
+
+ggplot(data=top_20_grad_rate, aes(x=top_20_grad_rate$College, y=top_20_grad_rate$C150_4)) +
+    geom_bar(stat="identity", fill="#00897B") + 
+  theme(axis.text.x=element_text(angle=90,hjust=1,vjust=0.5)) +
+    xlab("College") + ylab("Graduation Rate") +
+  ggtitle("Top 20 Colleges with the best graduation rate")
+
+```
+
+The graduation rates of top university are similar and most of them approaching 100%. We will see later on that there is a significant influence of graduation rate from SAT scores.
+
+```{r}
+ggplot(top_grad_rate, aes(x=top_grad_rate$C150_4, color=CollegeType,
+                          fill=CollegeType, group=CollegeType)) +
+  geom_density(alpha=0.5) +
+  theme_light(base_size=16) +
+  xlab("Graduation Rate") + 
+  ggtitle("Distrubution 
+          of Graduation rate by College Type")
+```
+
+We see that private non-profit has the highest gradation rate while private for-profit has the worse graduation rate. There is a dual distribution for private for-profit colleges, one distribution has poor results and one distribution has results similar to non-profit private colleges. This dual distribution for private for-profit is seen in later results as well.
+
+Does having higher SAT score improve graduation rate?
+
+```{r}
+grad_rate$total_sat <- grad_rate$SATMTMID + grad_rate$SATVRMID + grad_rate$SATWRMID
+
+fit <- lm(grad_rate$C150_4~grad_rate$total_sat)
+
+coef(fit)
+
+ggplot(grad_rate, aes(x=grad_rate$total_sat, y=grad_rate$C150_4, group=1)) + 
+  geom_point() + geom_abline(intercept = -0.6096836814, slope = 0.0007403611 , colour='#00897B') +
+  xlab("SAT medium of College") + ylab("Graudation Rate") +
+  ggtitle("SAT Score vs Graduation Rate for Colleges")
+
+summary(fit)
+```
+
+There is a clear positive relationship between SAT and graduation rate at least for colleges. 
+
+
+```{r}
+predictions <- predict(fit, grad_rate)
+
+rmse <- mean((grad_rate$C150_4 - predictions)^2)
+
+print(rmse)
+```
+
+Therefore, the Root mean square error is 0.008597 which is acceptable for this fit.
+
+*****
+## 7. Conclusions
+
+This was an in-depth exploratory data analysis. The idea is to understand and get familiar with this extremely large and rich dataset. Most of the understanding was conceived from plots of the data set in various ways, it is the graphs that can tell a very interesting story. This is a data set that is 1.1 GB in size with 1731 columns and 124699 rows. From 1996 to 2013, there is a trend of number of colleges is increasing. From our analysis, it is observed that SAT scores resemble a normal distribution.
+
+Private non-profit colleges have the best earnings while public colleges have lower earnings for students. Private for-profit schools are made from two distribution, one distribution that is similar to private non-profit colleges while one distribution creates poor results. Students that are looking at Private for-profit colleges should pay extra attention.
+
+Most expensive colleges are within large cities and have a relatively famous reputation. Private nonprofit colleges are sometimes the most expensive as well. The best ROI in terms of cost are community colleges while the best ROI in terms of SAT score are famous colleges. This shows that high school students should work harder to get into high SAT score colleges as the reward is not linear. Finally, it was observed that the graduation rate is highest in famous colleges and graduation rate of a college is positively linked with SAT scores of that college.
+
+The success rate in private nonprofit colleges is very high but can be more expensive, this might be worth it for students that like to invest in their education. Public college for the most part creates good results and most students can be very successful. Private for-profit colleges are a hit or miss, be very careful when selecting for-profit colleges.
+
+There are many variables within this dataset that are not investigated as there are hundreds of variables. However, the most important variables and the variables that students are most interested in are discussed here. From the conclusions here, students should have a bigger understand of the general landscape of higher education and have a good comparison when a specific school is looked at.
+
